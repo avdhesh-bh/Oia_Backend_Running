@@ -70,18 +70,26 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=["*"],
-    allow_methods=["*"],
+    allow_origins=[
+        "https://io.medicaps.ac.in",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+        "*"  # Fallback for development
+    ],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
 # Include routes
 app.include_router(api_router)
 
-# Serve uploaded files (gallery, etc.)
+# Serve uploaded files (gallery, team, etc.)
 # Existing gallery items are stored with paths like `/gallery/<filename>`
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 app.mount("/gallery", StaticFiles(directory="uploads/gallery"), name="gallery")
+app.mount("/team", StaticFiles(directory="uploads/team"), name="team")
 
 # Root endpoint
 @app.get("/api/")
