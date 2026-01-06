@@ -3,9 +3,13 @@ from datetime import datetime, timedelta
 import os
 import uuid
 import hashlib
+import logging
 from dotenv import load_dotenv
 from pathlib import Path
 from typing import Optional, List
+
+# Setup logging
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 ROOT_DIR = Path(__file__).parent
@@ -309,11 +313,27 @@ class DatabaseOperations:
     async def update_team_member(member_id: str, update_data: dict) -> dict:
         """Update a team member"""
         update_data['updatedAt'] = datetime.utcnow()
-        update_data = {k: v for k, v in update_data.items() if v is not None}
+        
+        # Filter out None values and empty strings for optional fields only
+        # Keep required fields even if empty (they should be validated at the form level)
+        filtered_data = {}
+        for k, v in update_data.items():
+            if k in ['name', 'role', 'bio']:
+                # Keep required fields even if empty
+                if v is not None:
+                    filtered_data[k] = v
+            elif k == 'image':
+                # Image field should allow empty strings for removal
+                if v is not None:
+                    filtered_data[k] = v
+            else:
+                # Filter out None values and empty strings for optional fields
+                if v is not None and (isinstance(v, str) and v.strip() != '' or not isinstance(v, str)):
+                    filtered_data[k] = v
         
         result = await team_collection.update_one(
             {'id': member_id},
-            {'$set': update_data}
+            {'$set': filtered_data}
         )
         
         if result.modified_count:

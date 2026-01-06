@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, status, Query, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Depends, status, Query, UploadFile, File, Form, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import List, Optional, Union
 import logging
@@ -548,7 +548,14 @@ async def create_news_admin(news: NewsCreate, current_username: str = Depends(ve
 async def update_news_admin(news_id: str, news: NewsUpdate, current_username: str = Depends(verify_token)):
     """Update news article - Admin only"""
     try:
-        update_data = {k: v for k, v in news.dict().items() if v is not None}
+        update_data = {}
+        news_dict = news.dict()
+        
+        # Only include fields that are not None and not empty strings
+        for k, v in news_dict.items():
+            if v is not None and (isinstance(v, str) and v.strip() != '' or not isinstance(v, str)):
+                update_data[k] = v
+        
         updated_news = await DatabaseOperations.update_news(news_id, update_data)
         if not updated_news:
             raise HTTPException(status_code=404, detail="News not found")
@@ -621,24 +628,213 @@ async def delete_partnership_admin(partnership_id: str, current_username: str = 
 # ========================
 
 @router.post("/admin/team", response_model=TeamMember)
-async def create_team_member_admin(member: TeamMemberCreate, current_username: str = Depends(verify_token)):
-    """Create team member - Admin only"""
+async def create_team_member_admin(
+    file: UploadFile = File(None),
+    name: str = Form(...),
+    role: str = Form(...),
+    bio: str = Form(...),
+    email: str = Form(""),
+    phone: str = Form(""),
+    department: str = Form(""),
+    image_url: str = Form(None),
+    order: int = Form(0),
+    is_leadership: bool = Form(False),
+    is_active: bool = Form(True),
+    current_username: str = Depends(verify_token)
+):
+    """Create team member with optional file upload - Admin only"""
     try:
-        created_member = await DatabaseOperations.create_team_member(member.dict())
+        # Handle image upload
+        image_path = None
+        if file:
+            # Validate file type
+            allowed_types = ["image/jpeg", "image/png", "image/gif", "image/webp"]
+            if file.content_type not in allowed_types:
+                raise HTTPException(status_code=400, detail="Invalid file type. Only JPEG, PNG, GIF, and WebP are allowed.")
+            
+            # Save the uploaded file
+            image_path = save_team_upload_file(file)
+        elif image_url:
+            image_path = image_url
+        
+        # Prepare team member data
+        member_data = {
+            "name": name,
+            "role": role,
+            "bio": bio,
+            "email": email,
+            "phone": phone,
+            "department": department,
+            "image": f"/{image_path}" if image_path else None,
+            "order": order,
+            "is_leadership": is_leadership,
+            "is_active": is_active,
+            "uploadDate": datetime.utcnow()
+        }
+        
+        # Save to database
+        created_member = await DatabaseOperations.create_team_member(member_data)
         return created_member
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error creating team member: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to create team member")
 
 @router.put("/admin/team/{member_id}", response_model=TeamMember)
-async def update_team_member_admin(member_id: str, member: TeamMemberUpdate, current_username: str = Depends(verify_token)):
+async def update_team_member_admin(
+    member_id: str,
+    request: Request,
+    file: UploadFile = File(None),
+    name: str = Form(None),
+    role: str = Form(None),
+    bio: str = Form(None),
+    email: str = Form(None),
+    phone: str = Form(None),
+    department: str = Form(None),
+    image_url: Optional[str] = Form(None),
+    order: int = Form(None),
+    is_leadership: bool = Form(None),
+    is_active: bool = Form(None),
+    current_username: str = Depends(verify_token)
+):
     """Update team member - Admin only"""
     try:
-        update_data = {k: v for k, v in member.dict().items() if v is not None}
-        updated_member = await DatabaseOperations.update_team_member(member_id, update_data)
-        if not updated_member:
+        logger.info(f"=== TEAM MEMBER UPDATE DEBUG ===")
+        logger.info(f"Member ID: {member_id}")
+        logger.info(f"Received image_url parameter: '{image_url}' (type: {type(image_url)})")
+        logger.info(f"image_url is None: {image_url is None}")
+        logger.info(f"image_url length: {len(image_url) if image_url else 'N/A'}")
+        
+        # Debug all received parameters
+        logger.info(f"All received parameters:")
+        logger.info(f"  name: {name} (type: {type(name)})")
+        logger.info(f"  role: {role} (type: {type(role)})")
+        logger.info(f"  bio: {bio} (type: {type(bio)})")
+        logger.info(f"  email: {email} (type: {type(email)})")
+        logger.info(f"  phone: {phone} (type: {type(phone)})")
+        logger.info(f"  department: {department} (type: {type(department)})")
+        logger.info(f"  order: {order} (type: {type(order)})")
+        logger.info(f"  is_leadership: {is_leadership} (type: {type(is_leadership)})")
+        logger.info(f"  is_active: {is_active} (type: {type(is_active)})")
+        
+        existing = await DatabaseOperations.get_team_member_by_id(member_id)
+        if not existing:
             raise HTTPException(status_code=404, detail="Team member not found")
-        return updated_member
+
+        # Handle image upload or URL
+        update_data = {}
+        
+        if file:
+            logger.info("Processing uploaded file...")
+            # Validate file type
+            if not file.content_type.startswith('image/'):
+                raise HTTPException(status_code=400, detail="Invalid file type. Only JPEG, PNG, GIF, and WebP are allowed.")
+            
+            # Save the uploaded file
+            image_path = save_team_upload_file(file)
+            update_data['image'] = f"/{image_path}"
+            logger.info(f"Image file uploaded: {image_path}")
+        elif image_url is not None:
+            # Handle image URL (including empty string for removal)
+            logger.info(f"Processing image_url: '{image_url}' (length: {len(image_url)})")
+            if image_url.strip() != '':
+                update_data['image'] = f"/{image_url}"
+                logger.info(f"Image URL updated: {image_url}")
+            else:
+                # Empty string means remove the image
+                # First, get the current member to find the existing image file
+                current_member = await DatabaseOperations.get_team_member_by_id(member_id)
+                if current_member and current_member.get('image'):
+                    old_image_path = current_member['image']
+                    # Remove leading slash if present
+                    if old_image_path.startswith('/'):
+                        old_image_path = old_image_path[1:]
+                    
+                    # Construct full file path
+                    full_file_path = old_image_path
+                    
+                    # Delete the actual image file
+                    try:
+                        if os.path.exists(full_file_path):
+                            os.remove(full_file_path)
+                            logger.info(f"Deleted image file: {full_file_path}")
+                        else:
+                            logger.info(f"Image file not found for deletion: {full_file_path}")
+                    except Exception as e:
+                        logger.error(f"Error deleting image file {full_file_path}: {str(e)}")
+                
+                # Set image field to empty string in database
+                update_data['image'] = ''
+                logger.info("Image removal requested - setting image to empty string")
+        else:
+            logger.info("No image changes requested - image_url is None")
+        
+        # Check raw form data for image_url parameter
+        try:
+            form_data = await request.form()
+            if 'image_url' in form_data:
+                raw_image_url = form_data['image_url']
+                logger.info(f"Raw form data image_url: '{raw_image_url}' (type: {type(raw_image_url)})")
+                if raw_image_url == '' or raw_image_url == b'':
+                    logger.info("Detected empty image_url in raw form data - processing removal")
+                    # Empty string means remove the image
+                    current_member = await DatabaseOperations.get_team_member_by_id(member_id)
+                    if current_member and current_member.get('image'):
+                        old_image_path = current_member['image']
+                        # Remove leading slash if present
+                        if old_image_path.startswith('/'):
+                            old_image_path = old_image_path[1:]
+                        
+                        # Construct full file path
+                        full_file_path = old_image_path
+                        
+                        # Delete the actual image file
+                        try:
+                            if os.path.exists(full_file_path):
+                                os.remove(full_file_path)
+                                logger.info(f"Deleted image file: {full_file_path}")
+                            else:
+                                logger.info(f"Image file not found for deletion: {full_file_path}")
+                        except Exception as e:
+                            logger.error(f"Error deleting image file {full_file_path}: {str(e)}")
+                    
+                    # Set image field to empty string in database
+                    update_data['image'] = ''
+                    logger.info("Image removal processed from raw form data")
+        except Exception as e:
+            logger.error(f"Error reading raw form data: {str(e)}")
+        
+        logger.info(f"Final update_data image field: {update_data.get('image', 'NOT_SET')}")
+        logger.info(f"=== END TEAM MEMBER UPDATE DEBUG ===")
+        
+        # Update other fields if provided
+        logger.info(f"Processing boolean fields - is_leadership: {is_leadership}, is_active: {is_active}")
+        if name is not None:
+            update_data['name'] = name
+        if role is not None:
+            update_data['role'] = role
+        if bio is not None:
+            update_data['bio'] = bio
+        if email is not None and email.strip() != '':
+            update_data['email'] = email
+        if phone is not None and phone.strip() != '':
+            update_data['phone'] = phone
+        if department is not None and department.strip() != '':
+            update_data['department'] = department
+        if order is not None:
+            update_data['order'] = order
+        if is_leadership is not None:
+            update_data['is_leadership'] = is_leadership
+            logger.info(f"Updated is_leadership to: {is_leadership}")
+        if is_active is not None:
+            update_data['is_active'] = is_active
+            logger.info(f"Updated is_active to: {is_active}")
+        
+        logger.info(f"Final update_data: {update_data}")
+
+        updated = await DatabaseOperations.update_team_member(member_id, update_data)
+        return updated
     except HTTPException:
         raise
     except Exception as e:
@@ -677,7 +873,14 @@ async def create_event_admin(event: EventCreate, current_username: str = Depends
 async def update_event_admin(event_id: str, event: EventUpdate, current_username: str = Depends(verify_token)):
     """Update event - Admin only"""
     try:
-        update_data = {k: v for k, v in event.dict().items() if v is not None}
+        update_data = {}
+        event_dict = event.dict()
+        
+        # Only include fields that are not None and not empty strings
+        for k, v in event_dict.items():
+            if v is not None and (isinstance(v, str) and v.strip() != '' or not isinstance(v, str)):
+                update_data[k] = v
+        
         updated_event = await DatabaseOperations.update_event(event_id, update_data)
         if not updated_event:
             raise HTTPException(status_code=404, detail="Event not found")
@@ -708,13 +911,13 @@ async def delete_event_admin(event_id: str, current_username: str = Depends(veri
 from pathlib import Path
 import uuid
 import shutil
-from fastapi import UploadFile, File, Form
-from fastapi.responses import JSONResponse
-from fastapi import HTTPException
-from datetime import datetime
 
 UPLOAD_DIR = Path("uploads/gallery")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+# Create team uploads directory
+TEAM_UPLOAD_DIR = Path("uploads/team")
+TEAM_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 def save_upload_file(file: UploadFile, destination: Path) -> str:
     """Save uploaded file to the specified directory"""
@@ -732,6 +935,10 @@ def save_upload_file(file: UploadFile, destination: Path) -> str:
     except Exception as e:
         logger.error(f"Error saving file: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to save file")
+
+def save_team_upload_file(file: UploadFile) -> str:
+    """Save uploaded team member profile picture"""
+    return save_upload_file(file, TEAM_UPLOAD_DIR)
 
 @router.post("/admin/gallery", response_model=GalleryImage)
 async def upload_gallery_image_admin(

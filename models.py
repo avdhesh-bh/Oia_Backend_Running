@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator, EmailStr
 from typing import Optional, List
 from datetime import datetime
 from enum import Enum
@@ -252,13 +252,16 @@ class Partnership(PartnershipBase):
 class TeamMemberBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     role: str = Field(..., min_length=1, max_length=200)
-    bio: str = Field(..., min_length=10, max_length=1000)
-    image: Optional[str] = None
-    email: Optional[str] = Field(None, max_length=200)
-    phone: Optional[str] = Field(None, max_length=20)
-    office: Optional[str] = Field(None, max_length=100)
+    bio: str = Field(..., min_length=10, max_length=5000)
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = Field(None, max_length=50)
+    department: Optional[str] = Field(None, max_length=200)
+    office: Optional[str] = Field(None, max_length=200)
+    image: Optional[str] = Field(None, max_length=500)
     responsibilities: Optional[List[str]] = Field(default_factory=list)
     order: int = Field(default=0)  # For sorting display order
+    is_active: bool = Field(default=True)  # Add is_active field
+    is_leadership: bool = Field(default=False)  # Add is_leadership field
 
 class TeamMemberCreate(TeamMemberBase):
     pass
@@ -266,13 +269,16 @@ class TeamMemberCreate(TeamMemberBase):
 class TeamMemberUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=200)
     role: Optional[str] = Field(None, min_length=1, max_length=200)
-    bio: Optional[str] = Field(None, min_length=10, max_length=1000)
+    bio: Optional[str] = Field(None, min_length=10, max_length=5000)
+    department: Optional[str] = Field(None, min_length=1, max_length=200)
     image: Optional[str] = None
-    email: Optional[str] = Field(None, max_length=200)
+    email: Optional[EmailStr] = None
     phone: Optional[str] = Field(None, max_length=20)
     office: Optional[str] = Field(None, max_length=100)
     responsibilities: Optional[List[str]] = None
     order: Optional[int] = None
+    is_active: Optional[bool] = None  # Add is_active field for updates
+    is_leadership: Optional[bool] = None  # Add is_leadership field for updates
 
 class TeamMember(TeamMemberBase):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
