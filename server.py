@@ -95,3 +95,18 @@ app.mount("/team", StaticFiles(directory="uploads/team"), name="team")
 @app.get("/api/")
 async def root():
     return {"message": "Student Exchange Programs API - Medi-Caps University"}
+
+# Port configuration for deployment
+if __name__ == "__main__":
+    import uvicorn
+    # Get port from environment variable (Render provides this)
+    # Default to 8000 for local development
+    port = int(os.getenv("PORT", 8000))
+    logger.info(f"🚀 Starting server on port {port}")
+    
+    uvicorn.run(
+        "server:app",
+        host="0.0.0.0",
+        port=port,
+        reload=False  # Don't use reload in production
+    )
